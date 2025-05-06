@@ -87,3 +87,32 @@ class DashboardOut(BaseModel):
     level_distribution_today: List[LevelCount]
     top_versions: List[VersionErrorStat]
     last_log_timestamp: Optional[datetime]
+
+
+class TimePoint(BaseModel):
+    label: str
+    count: int
+    timestamp: datetime
+
+
+class OSStat(BaseModel):
+    os: str
+    count: int
+
+class DeviceStat(BaseModel):
+    model: str
+    count: int
+
+class MessageStat(BaseModel):
+    message: str
+    count: int
+
+class CountryStat(BaseModel):
+    country: str
+    count: int
+
+class FullAnalyticsOut(BaseModel):
+    os_distribution: List[OSStat]
+    top_devices: List[DeviceStat]
+    top_messages: List[MessageStat]
+    errors_by_country: List[CountryStat]

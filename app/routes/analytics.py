@@ -1,10 +1,11 @@
 from sqlalchemy import select, func, cast, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.models import Log  
-from app.schemas import DashboardOut
+from app.schemas import DashboardOut, TimePoint, FullAnalyticsOut, OSStat, DeviceStat, MessageStat, CountryStat
 from app.deps import get_db
+from typing import List
 
 router = APIRouter()
 
@@ -120,3 +121,129 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         ],
         "last_log_timestamp": last_log,
     }
+
+@router.get("/analytics/logs_count", response_model=List[TimePoint])
+async def get_logs_count(
+    project_token: str,
+    interval: str = Query("day", enum=["hour", "day", "month"]),
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.utcnow()
+
+    if interval == "hour":
+        group_expr = func.date_trunc("hour", Log.timestamp)
+        label_format = "HH24:MI"
+        start_time = now - timedelta(hours=24)
+
+    elif interval == "day":
+        group_expr = func.date_trunc("day", Log.timestamp)
+        label_format = "DD.MM"
+        start_time = now - timedelta(days=7)
+
+    elif interval == "month":
+        group_expr = func.date_trunc("day", Log.timestamp)
+        label_format = "DD.MM"
+        start_time = now - timedelta(days=30)
+
+    else:
+        raise ValueError("Invalid interval")
+
+    query = (
+        select(
+            func.to_char(group_expr, label_format).label("label"),
+            func.count().label("count"),
+            group_expr.label("timestamp")
+        )
+        .where(
+            Log.token == project_token,
+            Log.timestamp >= start_time
+        )
+        .group_by(group_expr)
+        .order_by(group_expr)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [TimePoint(label=row.label, count=row.count, timestamp=row.timestamp) for row in rows]
+
+
+@router.get("/analytics/summary", response_model=FullAnalyticsOut)
+async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_db)):
+    # 1. ОС
+    os_expr = cast(Log.device["platform"], String)
+    os_query = (
+        select(os_expr.label("os"), func.count().label("count"))
+        .where(
+            Log.token == project_token,
+            os_expr.isnot(None),
+            os_expr != ""
+        )
+        .group_by("os")
+    )
+
+    # 2. Пристрої
+    model_expr = cast(Log.custom["deviceModel"], String)
+    model_query = (
+        select(model_expr.label("model"), func.count().label("count"))
+        .where(
+            Log.token == project_token,
+            model_expr.isnot(None),
+            model_expr != ""
+        )
+        .group_by("model")
+        .order_by(func.count().desc())
+        .limit(7)
+    )
+
+    # 3. Повідомлення
+    message_query = (
+        select(Log.message.label("message"), func.count().label("count"))
+        .where(
+            Log.token == project_token,
+            Log.message.isnot(None),
+            Log.message != ""
+        )
+        .group_by(Log.message)
+        .order_by(func.count().desc())
+        .limit(10)
+    )
+
+    # 4. Помилки по країнах
+    country_expr = cast(Log.custom["country"], String)
+    country_query = (
+        select(country_expr.label("country"), func.count().label("count"))
+        .where(
+            Log.token == project_token,
+            # Log.level.in_(["error", "critical"]),
+            country_expr.isnot(None),
+            country_expr != ""
+        )
+        .group_by("country")
+        .order_by(func.count().desc())
+        .limit(5)
+    )
+
+    # Виконання запитів
+    os_rows = (await db.execute(os_query)).all()
+    model_rows = (await db.execute(model_query)).all()
+    message_rows = (await db.execute(message_query)).all()
+    country_rows = (await db.execute(country_query)).all()
+
+    # Повернення у відповідному форматі
+    return FullAnalyticsOut(
+        os_distribution=[
+            OSStat(os=row.os, count=row.count) for row in os_rows
+        ],
+        top_devices=[
+            DeviceStat(model=row.model, count=row.count) for row in model_rows
+        ],
+        top_messages=[
+            MessageStat(message=row.message, count=row.count) for row in message_rows
+        ],
+        errors_by_country=[
+            CountryStat(country=row.country, count=row.count) for row in country_rows
+        ]
+    )
+
+
