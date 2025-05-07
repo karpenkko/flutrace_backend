@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, cast, String, desc
 from datetime import datetime
@@ -7,6 +8,9 @@ from app.deps import get_db
 from app.models import Log
 from app.schemas import LogCreate, LogOut, LogDetail
 from sqlalchemy.future import select
+from app.utils.sse_manager import sse_manager
+import json
+from fastapi.encoders import jsonable_encoder
 
 ENVIRONMENT_MAP = {
     "prod": "production",
@@ -25,7 +29,19 @@ async def create_log(log: LogCreate, db: AsyncSession = Depends(get_db)):
     db.add(new_log)
     await db.commit()
     await db.refresh(new_log)
+
+    log_out = LogOut.model_validate(new_log, from_attributes=True)
+    payload = jsonable_encoder(log_out)
+    await sse_manager.push(log.token, payload)
+
+    # await sse_manager.push(log.token, new_log)
+
     return new_log
+
+@router.get("/logs/stream/{project_token}")
+async def stream_logs(project_token: str, request: Request):
+    event_generator = sse_manager.listen(project_token, request)
+    return StreamingResponse(event_generator, media_type="text/event-stream")
 
 @router.get("/logs", response_model=list[LogDetail])
 async def get_all_logs(db: AsyncSession = Depends(get_db)):

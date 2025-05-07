@@ -52,6 +52,10 @@ class LogOut(BaseModel):
     environment: Optional[str] = None
     device: Optional[Dict[str, Any]] = None
 
+    model_config = {
+        "from_attributes": True,
+    }
+
 
 class LogDetail(LogOut):
     device: Optional[Dict[str, Any]] = None
