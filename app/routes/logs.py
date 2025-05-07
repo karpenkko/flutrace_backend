@@ -41,7 +41,7 @@ async def get_logs_for_project(
     os: Optional[str] = None,
     search: Optional[str] = None,
     before: Optional[datetime] = None,
-    limit: int = 10,
+    limit: int = 15,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Log).where(Log.token == project_token)
