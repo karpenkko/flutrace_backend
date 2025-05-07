@@ -183,7 +183,7 @@ async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_
     )
 
     # 2. Пристрої
-    model_expr = cast(Log.custom["deviceModel"], String)
+    model_expr = cast(Log.device["model"], String)
     model_query = (
         select(model_expr.label("model"), func.count().label("count"))
         .where(
