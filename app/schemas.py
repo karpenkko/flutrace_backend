@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -52,9 +52,7 @@ class LogOut(BaseModel):
     environment: Optional[str] = None
     device: Optional[Dict[str, Any]] = None
 
-    model_config = {
-        "from_attributes": True,
-    }
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LogDetail(LogOut):

@@ -1,5 +1,7 @@
-from sqlalchemy import select, func, cast, String, text
+from sqlalchemy import select, func, cast, String, text, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import literal_column
+from sqlalchemy.dialects.postgresql import ARRAY
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from app.models import Log  
@@ -72,12 +74,13 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         func.count().label("errors")
     ).where(
         Log.token == project_token,
-        Log.level.in_(["error", "critical"])
+        Log.level.in_(["error", "critical"]),
+        Log.custom["appVersion"].isnot(None),
+        text("logs.custom ->> 'appVersion' ~ '^[0-9]+(\\.[0-9]+)*$'")
     ).group_by(
         app_version_expr
-    ).order_by(
-        func.count().desc()
-    ).limit(5)
+)
+
 
     # 🕒 Час останнього логу
     last_log_query = select(func.max(Log.timestamp)).where(

@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime, Table, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -33,7 +33,7 @@ class Log(Base):
     id = Column(Integer, primary_key=True, index=True)
     message = Column(String, nullable=False)
     level = Column(String, nullable=False)
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     token = Column(String, nullable=False)
     environment = Column(String, nullable=True)
 
