@@ -5,12 +5,13 @@ from sqlalchemy import and_, or_, cast, String, desc
 from datetime import datetime
 from typing import Optional, List
 from app.deps import get_db
-from app.models import Log
+from app.models import Log, User
 from app.schemas import LogCreate, LogOut, LogDetail
 from sqlalchemy.future import select
 from app.utils.sse_manager import sse_manager
 import json
 from fastapi.encoders import jsonable_encoder
+from app.auth.jwt import get_current_user
 
 ENVIRONMENT_MAP = {
     "prod": "production",
@@ -23,7 +24,7 @@ ENVIRONMENT_MAP = {
 
 router = APIRouter(tags=["Logs"])
 
-@router.post("/logs", response_model=LogOut)
+@router.post("/logs", response_model=LogOut, )
 async def create_log(log: LogCreate, db: AsyncSession = Depends(get_db)):
     new_log = Log(**log.model_dump())
     db.add(new_log)
@@ -44,7 +45,7 @@ async def stream_logs(project_token: str, request: Request):
     return StreamingResponse(event_generator, media_type="text/event-stream")
 
 @router.get("/logs", response_model=list[LogDetail])
-async def get_all_logs(db: AsyncSession = Depends(get_db)):
+async def get_all_logs(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(select(Log))
     logs = result.scalars().all()
     return logs
@@ -59,6 +60,7 @@ async def get_logs_for_project(
     before: Optional[datetime] = None,
     limit: int = 15,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     query = select(Log).where(Log.token == project_token)
 
@@ -89,7 +91,7 @@ async def get_logs_for_project(
 
 
 @router.get("/logs/{project_token}/{log_id}", response_model=LogDetail)
-async def get_log_detail(project_token: str, log_id: int, db: AsyncSession = Depends(get_db)):
+async def get_log_detail(project_token: str, log_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(select(Log).where(Log.id == log_id, Log.token == project_token))
     log = result.scalar_one_or_none()
     if not log:

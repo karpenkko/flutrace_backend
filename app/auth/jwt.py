@@ -37,6 +37,9 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
     credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> User:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Missing credentials")
+    
     token = credentials.credentials
 
     try:

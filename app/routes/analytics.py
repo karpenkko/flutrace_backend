@@ -4,15 +4,16 @@ from sqlalchemy.sql import literal_column
 from sqlalchemy.dialects.postgresql import ARRAY
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
-from app.models import Log  
+from app.models import Log, User 
 from app.schemas import DashboardOut, TimePoint, FullAnalyticsOut, OSStat, DeviceStat, MessageStat, CountryStat
 from app.deps import get_db
 from typing import List
+from app.auth.jwt import get_current_user
 
-router = APIRouter()
+router = APIRouter( tags=["Report"])
 
 @router.get("/projects/{project_token}/dashboard", response_model=DashboardOut)
-async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
+async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     now = datetime.utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
@@ -46,18 +47,19 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         Log.timestamp < today_start
     )
 
-    # 📊 Динаміка логів за останні 7 днів
+    # Динаміка логів за останні 7 днів
     log_counts_query = select(
         func.date_trunc("day", Log.timestamp).label("date"),
         func.count().label("count")
     ).where(
         Log.token == project_token,
+        Log.level.in_(["warning", "error", "critical"]),
         Log.timestamp >= week_ago_start
     ).group_by(
         text("date")
     ).order_by(text("date"))
 
-    # 📈 Розподіл рівнів логів за сьогодні
+    # Розподіл рівнів логів за сьогодні
     level_distribution_query = select(
         Log.level,
         func.count().label("count")
@@ -66,7 +68,7 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         Log.timestamp >= today_start
     ).group_by(Log.level)
 
-    # 🔢 Групування за версією
+    # Групування за версією
     app_version_expr = cast(Log.custom["appVersion"], String).label("version")
 
     top_versions_query = select(
@@ -74,7 +76,7 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         func.count().label("errors")
     ).where(
         Log.token == project_token,
-        Log.level.in_(["error", "critical"]),
+        Log.level.in_(["warning", "error", "critical"]),
         Log.custom["appVersion"].isnot(None),
         text("logs.custom ->> 'appVersion' ~ '^[0-9]+(\\.[0-9]+)*$'")
     ).group_by(
@@ -82,12 +84,11 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
 )
 
 
-    # 🕒 Час останнього логу
+    # Час останнього логу
     last_log_query = select(func.max(Log.timestamp)).where(
         Log.token == project_token
     )
 
-    # 🔄 Виконання всіх запитів
     total_today = (await db.execute(total_today_query)).scalar()
     error_critical = (await db.execute(error_critical_query)).first()
     total_yesterday = (await db.execute(total_yesterday_query)).scalar()
@@ -125,11 +126,12 @@ async def get_dashboard(project_token: str, db: AsyncSession = Depends(get_db)):
         "last_log_timestamp": last_log,
     }
 
-@router.get("/analytics/logs_count", response_model=List[TimePoint])
+@router.get("/projects/{project_token}/analytics/logs_count", response_model=List[TimePoint])
 async def get_logs_count(
     project_token: str,
     interval: str = Query("day", enum=["hour", "day", "month"]),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     now = datetime.utcnow()
 
@@ -159,6 +161,7 @@ async def get_logs_count(
         )
         .where(
             Log.token == project_token,
+            Log.level.in_(["warning", "error", "critical"]),
             Log.timestamp >= start_time
         )
         .group_by(group_expr)
@@ -171,26 +174,28 @@ async def get_logs_count(
     return [TimePoint(label=row.label, count=row.count, timestamp=row.timestamp) for row in rows]
 
 
-@router.get("/analytics/summary", response_model=FullAnalyticsOut)
-async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_db)):
-    # 1. ОС
+@router.get("/projects/{project_token}/analytics/summary", response_model=FullAnalyticsOut)
+async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # ос
     os_expr = cast(Log.device["platform"], String)
     os_query = (
         select(os_expr.label("os"), func.count().label("count"))
         .where(
             Log.token == project_token,
+            Log.level.in_(["warning", "error", "critical"]),
             os_expr.isnot(None),
             os_expr != ""
         )
         .group_by("os")
     )
 
-    # 2. Пристрої
+    # Пристрої
     model_expr = cast(Log.device["model"], String)
     model_query = (
         select(model_expr.label("model"), func.count().label("count"))
         .where(
             Log.token == project_token,
+            Log.level.in_(["warning", "error", "critical"]),
             model_expr.isnot(None),
             model_expr != ""
         )
@@ -199,11 +204,12 @@ async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_
         .limit(7)
     )
 
-    # 3. Повідомлення
+    # Повідомлення
     message_query = (
         select(Log.message.label("message"), func.count().label("count"))
         .where(
             Log.token == project_token,
+            Log.level.in_(["warning", "error", "critical"]),
             Log.message.isnot(None),
             Log.message != ""
         )
@@ -212,13 +218,13 @@ async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_
         .limit(10)
     )
 
-    # 4. Помилки по країнах
+    # Помилки по країнах
     country_expr = cast(Log.custom["country"], String)
     country_query = (
         select(country_expr.label("country"), func.count().label("count"))
         .where(
             Log.token == project_token,
-            # Log.level.in_(["error", "critical"]),
+            Log.level.in_(["warning", "error", "critical"]),
             country_expr.isnot(None),
             country_expr != ""
         )
@@ -227,13 +233,11 @@ async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_
         .limit(5)
     )
 
-    # Виконання запитів
     os_rows = (await db.execute(os_query)).all()
     model_rows = (await db.execute(model_query)).all()
     message_rows = (await db.execute(message_query)).all()
     country_rows = (await db.execute(country_query)).all()
 
-    # Повернення у відповідному форматі
     return FullAnalyticsOut(
         os_distribution=[
             OSStat(os=row.os, count=row.count) for row in os_rows
@@ -248,5 +252,4 @@ async def get_full_analytics(project_token: str, db: AsyncSession = Depends(get_
             CountryStat(country=row.country, count=row.count) for row in country_rows
         ]
     )
-
 

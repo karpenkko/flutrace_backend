@@ -2,10 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from app.models import Log
+from app.schemas import LogDetail
 from app.deps import get_db
+from sqlalchemy.future import select
 
 router = APIRouter(tags=["Dev"], prefix="/dev")
 
+@router.get("/logs", response_model=list[LogDetail])
+async def get_all_logs(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Log))
+    logs = result.scalars().all()
+    return logs
 
 @router.post("/logs/seed", status_code=201)
 async def seed_logs(db: AsyncSession = Depends(get_db)):
